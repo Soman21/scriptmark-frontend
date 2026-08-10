@@ -6,12 +6,12 @@ import { PrimaryButton } from '../components/ui.jsx'
 const messages = [
   {
     role: 'user',
-    text: "I've just uploaded the new marking guide for the Physics Mid-term (Class 2B). Can you verify the grading criteria for Question 4 - Quantum Mechanics?",
-    file: 'physics_midterm_v2.pdf',
+    text: "I've just uploaded the new marking guide for the Digital Electronics (ECE 831). Can you verify the grading criteria for Question 4 - Computer Architecture?",
+    file: 'digital_electronics_v2.pdf',
   },
   {
     role: 'assistant',
-    intro: 'Got it. I\u2019ve processed the Physics Mid-term guide. Ready to scan scripts.',
+    intro: 'Got it. I\u2019ve processed the Digital Electronics guide. Ready to scan scripts.',
     body: 'For Question 4, I\u2019ve identified four key marking points:',
     points: [
       '2 points for the correct Schr\u00f6dinger equation derivation.',
@@ -53,12 +53,12 @@ export default function Dashboard() {
               </div>
               <div className="max-w-xl rounded-2xl border border-sky-100 bg-sky-50 px-5 py-4">
                 <p className="text-sm text-slate-800">
-                  {m.intro.split('Physics Mid-term').map((chunk, idx) =>
+                  {m.intro.split('Digital Electronics').map((chunk, idx) =>
                     idx === 0 ? (
                       <span key={idx}>{chunk}</span>
                     ) : (
                       <span key={idx}>
-                        <span className="font-semibold text-sky-700">Physics Mid-term</span>
+                        <span className="font-semibold text-sky-700">Digital Electronics</span>
                         {chunk}
                       </span>
                     )
@@ -85,7 +85,7 @@ export default function Dashboard() {
             </div>
             <div className="flex-1">
               <p className="font-semibold text-slate-900">Queue Status</p>
-              <p className="text-sm text-slate-500">32 scripts pending for Class 2B. Estimated grading time: 4 minutes.</p>
+              <p className="text-sm text-slate-500">32 scripts pending for ECE 831. Estimated grading time: 4 minutes.</p>
             </div>
             <ChevronRight className="text-slate-400" size={18} />
           </div>
