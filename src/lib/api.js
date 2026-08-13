@@ -33,4 +33,7 @@ export const api = {
 
   confirmScore: (answerId, payload, token) =>
     request(`/api/results/${answerId}/confirm`, { method: 'PUT', body: payload, token }),
+
+  scoreScript: (scriptId, guideId, token) =>
+    request(`/api/results/scripts/${scriptId}/score`, { method: 'POST', body: { guideId }, token }),
 }
