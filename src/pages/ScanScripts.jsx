@@ -252,7 +252,7 @@ export default function ScanScripts() {
 
           {!latestScript ? (
             <div className="flex-1 flex items-center justify-center p-10 text-sm text-slate-400 text-center">
-              Upload a script image on the left — the extracted text from Google Cloud Vision will appear here.
+              Upload a script image on the left, the extracted text from Google Cloud Vision will appear here.
             </div>
           ) : (
             <>
@@ -276,7 +276,7 @@ export default function ScanScripts() {
                   </div>
                   <p className="whitespace-pre-wrap">
                     {latestScript.ocrText || (
-                      <span className="text-slate-400 italic">No text extracted yet — OCR may still be processing.</span>
+                      <span className="text-slate-400 italic">No text extracted yet, OCR may still be processing.</span>
                     )}
                   </p>
                 </div>
@@ -285,15 +285,21 @@ export default function ScanScripts() {
               {scoreResult && (
                 <div className="border-t border-slate-100 p-5 space-y-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Suggested Scores (from Llama 3.3 via Groq — a lecturer must confirm these)
+                    Suggested Scores (from Llama 3.3 via Groq, a lecturer must confirm these)
                   </p>
                   {scoreResult.answers.map((ans) => {
                     const question = scoreResult.questions.find((q) => q.id === ans.questionId)
+                    const label = question
+                      ? `Question ${question.number}${question.subLabel || ''}`
+                      : 'Question'
                     return (
                       <div key={ans.id} className="rounded-lg border border-slate-200 p-3">
                         <div className="flex items-center justify-between">
-                          <p className="text-sm font-medium text-slate-800">{question?.text || 'Question'}</p>
-                          <span className="text-sm font-semibold text-sky-600">
+                          <div>
+                            <span className="text-xs font-semibold text-sky-600">{label}</span>
+                            <p className="text-sm font-medium text-slate-800">{question?.text}</p>
+                          </div>
+                          <span className="text-sm font-semibold text-sky-600 whitespace-nowrap ml-3">
                             {ans.suggestedScore} / {question?.maxMarks}
                           </span>
                         </div>
