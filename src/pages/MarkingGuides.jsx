@@ -97,41 +97,46 @@ export default function MarkingGuides() {
     )
   }
 
-  async function handleSaveAndPublish() {
+  async function handleSave(isDraft) {
     setError('')
     setSuccessMsg('')
 
     if (!title.trim()) {
-      setError('Please give this marking guide a subject / exam title.')
+      setError('Please give this marking guide a subject / exam title, even for a draft.')
       return
     }
-    if (groups.some((g) => !g.number.trim())) {
-      setError('Every question needs a number (e.g. "1", "2").')
-      return
-    }
-    if (groups.some((g) => g.parts.some((p) => !p.text.trim()))) {
-      setError('Every question (and sub-part) needs question text before publishing.')
-      return
+
+    if (!isDraft) {
+      if (groups.some((g) => !g.number.trim())) {
+        setError('Every question needs a number (e.g. "1", "2").')
+        return
+      }
+      if (groups.some((g) => g.parts.some((p) => !p.text.trim()))) {
+        setError('Every question (and sub-part) needs question text before publishing.')
+        return
+      }
     }
 
     // Flatten groups into the flat question list the backend expects.
     // A group with only one part has no sub-label (plain "Question 1").
     // A group with multiple parts gets subLabel a, b, c, ... automatically.
     const flatQuestions = groups.flatMap((g) =>
-      g.parts.map((p, i) => ({
-        number: g.number,
-        subLabel: g.parts.length > 1 ? letterLabel(i) : null,
-        text: p.text,
-        modelAnswer: p.modelAnswer,
-        keywords: p.keywords,
-        maxMarks: p.marks,
-      }))
+      g.parts
+        .filter((p) => isDraft || p.text.trim()) // drop fully-empty parts when publishing
+        .map((p, i) => ({
+          number: g.number,
+          subLabel: g.parts.length > 1 ? letterLabel(i) : null,
+          text: p.text,
+          modelAnswer: p.modelAnswer,
+          keywords: p.keywords,
+          maxMarks: p.marks,
+        }))
     )
 
     setSaving(true)
     try {
-      await api.createGuide({ title, questions: flatQuestions }, token)
-      setSuccessMsg('Marking guide saved and published.')
+      await api.createGuide({ title, questions: flatQuestions, isDraft }, token)
+      setSuccessMsg(isDraft ? 'Saved as a draft — you can finish it later.' : 'Marking guide saved and published.')
       setTitle('')
       setGroups([blankGroup(1), blankGroup(2)])
       loadGuides()
@@ -148,10 +153,10 @@ export default function MarkingGuides() {
         title="Create Marking Guide"
         right={
           <div className="flex items-center gap-2">
-            <SecondaryButton onClick={() => setSuccessMsg('Draft saved locally (publish to persist it to the database).')}>
-              Draft Save
+            <SecondaryButton onClick={() => handleSave(true)} disabled={saving}>
+              {saving ? 'Saving...' : 'Draft Save'}
             </SecondaryButton>
-            <PrimaryButton onClick={handleSaveAndPublish} disabled={saving} className="bg-sky-500 hover:bg-sky-400">
+            <PrimaryButton onClick={() => handleSave(false)} disabled={saving} className="bg-sky-500 hover:bg-sky-400">
               {saving ? 'Saving...' : 'Save & Publish'}
             </PrimaryButton>
           </div>
@@ -348,8 +353,12 @@ export default function MarkingGuides() {
                     <li key={g.id} className="pb-3 border-b border-slate-100 last:border-0 last:pb-0">
                       <div className="flex items-center justify-between">
                         <p className="text-sm font-medium text-slate-800">{g.title}</p>
-                        <span className="text-xs font-medium rounded-full px-2 py-0.5 bg-emerald-50 text-emerald-600">
-                          Active
+                        <span
+                          className={`text-xs font-medium rounded-full px-2 py-0.5 ${
+                            g.isDraft ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'
+                          }`}
+                        >
+                          {g.isDraft ? 'Draft' : 'Active'}
                         </span>
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">

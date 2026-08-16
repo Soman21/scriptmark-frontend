@@ -31,10 +31,11 @@ export const api = {
   getSessions: (token) => request('/api/sessions', { token }),
   createSession: (payload, token) => request('/api/sessions', { method: 'POST', body: payload, token }),
   getSessionScripts: (sessionId, token) => request(`/api/sessions/${sessionId}/scripts`, { token }),
+  updateCaScore: (scriptId, caScore, token) =>
+    request(`/api/sessions/scripts/${scriptId}/ca-score`, { method: 'PUT', body: { caScore }, token }),
 
   confirmScore: (answerId, payload, token) =>
     request(`/api/results/${answerId}/confirm`, { method: 'PUT', body: payload, token }),
-
   scoreScript: (scriptId, guideId, token) =>
     request(`/api/results/scripts/${scriptId}/score`, { method: 'POST', body: { guideId }, token }),
 }

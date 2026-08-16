@@ -10,6 +10,7 @@ import {
   HelpCircle,
   LogOut,
   ScanLine,
+  Archive as ArchiveIcon,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
@@ -19,6 +20,7 @@ const navItems = [
   { to: '/scan', label: 'Scan Scripts', icon: ScanLine },
   { to: '/guides', label: 'Marking Guides', icon: BookOpen },
   { to: '/results', label: 'Results', icon: CheckSquare },
+  { to: '/archive', label: 'Export Results', icon: ArchiveIcon },
   { to: '/analytics', label: 'Analytics', icon: BarChart2 },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
