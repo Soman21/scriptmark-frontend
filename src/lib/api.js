@@ -30,6 +30,7 @@ export const api = {
 
   getSessions: (token) => request('/api/sessions', { token }),
   createSession: (payload, token) => request('/api/sessions', { method: 'POST', body: payload, token }),
+  getSessionScripts: (sessionId, token) => request(`/api/sessions/${sessionId}/scripts`, { token }),
 
   confirmScore: (answerId, payload, token) =>
     request(`/api/results/${answerId}/confirm`, { method: 'PUT', body: payload, token }),

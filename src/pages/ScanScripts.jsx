@@ -9,6 +9,10 @@ export default function ScanScripts() {
   const { token } = useAuth()
   const fileInputRef = useRef(null)
   const [sessionId, setSessionId] = useState(null)
+  const [sessionTitle, setSessionTitle] = useState('')
+  const [sessionNameInput, setSessionNameInput] = useState('')
+  const [startingSession, setStartingSession] = useState(false)
+  const [studentIdInput, setStudentIdInput] = useState('')
   const [scripts, setScripts] = useState([])
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
@@ -18,7 +22,13 @@ export default function ScanScripts() {
   const [scoreResult, setScoreResult] = useState(null)
 
   useEffect(() => {
-    initSession()
+    // Check for an existing named session — don't auto-create one anymore.
+    const id = localStorage.getItem('scriptmark_active_session')
+    const title = localStorage.getItem('scriptmark_active_session_title')
+    if (id && title) {
+      setSessionId(id)
+      setSessionTitle(title)
+    }
     loadGuides()
   }, [])
 
@@ -31,19 +41,33 @@ export default function ScanScripts() {
     }
   }
 
-  async function initSession() {
-    let id = localStorage.getItem('scriptmark_active_session')
-    if (!id) {
-      try {
-        const session = await api.createSession({ title: `Scan Session — ${new Date().toLocaleDateString()}` }, token)
-        id = session.id
-        localStorage.setItem('scriptmark_active_session', id)
-      } catch (err) {
-        setError('Could not start a scanning session: ' + err.message)
-        return
-      }
+  async function handleStartSession() {
+    if (!sessionNameInput.trim()) {
+      setError('Give this session a name (e.g. the course code and exam name).')
+      return
     }
-    setSessionId(id)
+    setStartingSession(true)
+    setError('')
+    try {
+      const session = await api.createSession({ title: sessionNameInput.trim() }, token)
+      localStorage.setItem('scriptmark_active_session', session.id)
+      localStorage.setItem('scriptmark_active_session_title', session.title)
+      setSessionId(session.id)
+      setSessionTitle(session.title)
+    } catch (err) {
+      setError('Could not start a scanning session: ' + err.message)
+    } finally {
+      setStartingSession(false)
+    }
+  }
+
+  function handleEndSession() {
+    localStorage.removeItem('scriptmark_active_session')
+    localStorage.removeItem('scriptmark_active_session_title')
+    setSessionId(null)
+    setSessionTitle('')
+    setScripts([])
+    setScoreResult(null)
   }
 
   async function handleFileChange(e) {
@@ -55,6 +79,9 @@ export default function ScanScripts() {
     try {
       const formData = new FormData()
       formData.append('image', file)
+      if (studentIdInput.trim()) {
+        formData.append('studentIdentifier', studentIdInput.trim())
+      }
 
       const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:4000'}/api/sessions/${sessionId}/scripts`, {
         method: 'POST',
@@ -66,6 +93,7 @@ export default function ScanScripts() {
 
       setScripts((prev) => [data.script || data, ...prev])
       setScoreResult(null)
+      setStudentIdInput('')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -114,9 +142,16 @@ export default function ScanScripts() {
       <Topbar
         title="Scan Student Scripts"
         right={
-          <span className="hidden md:flex items-center gap-2 rounded-full bg-sky-50 text-sky-700 text-xs font-medium px-3 py-1">
-            SESSION: {sessionId ? sessionId.slice(0, 10).toUpperCase() : 'STARTING...'}
-          </span>
+          sessionTitle && (
+            <div className="flex items-center gap-2">
+              <span className="hidden md:flex items-center gap-2 rounded-full bg-sky-50 text-sky-700 text-xs font-medium px-3 py-1">
+                SESSION: {sessionTitle.toUpperCase()}
+              </span>
+              <button onClick={handleEndSession} className="text-xs text-slate-400 hover:text-rose-500 underline">
+                End Session
+              </button>
+            </div>
+          )
         }
         search="Search sessions..."
       />
@@ -126,6 +161,30 @@ export default function ScanScripts() {
           <AlertCircle size={16} /> {error}
         </div>
       )}
+
+      {!sessionId ? (
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 text-center">
+            <p className="font-semibold text-slate-900">Name this scanning session</p>
+            <p className="text-sm text-slate-500 mt-1">
+              e.g. "CS101 Midterm" or "Biology Final 2026" — this is what you and others will see instead of a random ID.
+            </p>
+            <input
+              value={sessionNameInput}
+              onChange={(e) => setSessionNameInput(e.target.value)}
+              placeholder="CS101 Midterm"
+              className="mt-4 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-400"
+            />
+            <PrimaryButton
+              onClick={handleStartSession}
+              disabled={startingSession}
+              className="mt-3 w-full justify-center bg-sky-500 hover:bg-sky-400"
+            >
+              {startingSession ? 'Starting...' : 'Start Scanning Session'}
+            </PrimaryButton>
+          </div>
+        </div>
+      ) : (
 
       <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6">
         {/* Left column: upload + queue */}
@@ -159,6 +218,14 @@ export default function ScanScripts() {
             </div>
             <p className="font-semibold text-slate-900">Drop Batch Here</p>
             <p className="text-sm text-slate-500 mt-1">Upload a script image — runs real OCR via Google Cloud Vision</p>
+
+            <input
+              value={studentIdInput}
+              onChange={(e) => setStudentIdInput(e.target.value)}
+              placeholder="Student ID or name (optional, but recommended)"
+              className="mt-4 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-center outline-none focus:ring-2 focus:ring-sky-400"
+            />
+
             <input
               ref={fileInputRef}
               type="file"
@@ -170,7 +237,7 @@ export default function ScanScripts() {
             <PrimaryButton
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading || !sessionId}
-              className="mt-4 mx-auto bg-sky-500 hover:bg-sky-400"
+              className="mt-3 mx-auto bg-sky-500 hover:bg-sky-400"
             >
               {uploading ? (
                 <>
@@ -218,7 +285,7 @@ export default function ScanScripts() {
                       {s.status === 'DIGITIZED' ? <CheckCircle2 size={16} /> : <div className="h-2 w-2 rounded-full bg-current" />}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-slate-800 truncate">{s.studentIdentifier || `Script ${s.id.slice(0, 8)}`}</p>
+                      <p className="text-sm text-slate-800 truncate">{s.studentIdentifier || 'Unnamed script'}</p>
                     </div>
                     <span
                       className={`text-xs font-medium ${
@@ -238,7 +305,7 @@ export default function ScanScripts() {
         <div className="rounded-xl border border-slate-200 bg-white flex flex-col">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
             <p className="text-sm font-medium text-slate-800">
-              {latestScript ? `Live Review: ${latestScript.studentIdentifier || latestScript.id.slice(0, 8)}` : 'Live Review'}
+              {latestScript ? `Live Review: ${latestScript.studentIdentifier || 'Unnamed script'}` : 'Live Review'}
             </p>
             <div className="flex items-center gap-3">
               <button className="text-slate-400 hover:text-slate-600">
@@ -252,7 +319,7 @@ export default function ScanScripts() {
 
           {!latestScript ? (
             <div className="flex-1 flex items-center justify-center p-10 text-sm text-slate-400 text-center">
-              Upload a script image on the left, the extracted text from Google Cloud Vision will appear here.
+              Upload a script image on the left — the extracted text from Google Cloud Vision will appear here.
             </div>
           ) : (
             <>
@@ -276,7 +343,7 @@ export default function ScanScripts() {
                   </div>
                   <p className="whitespace-pre-wrap">
                     {latestScript.ocrText || (
-                      <span className="text-slate-400 italic">No text extracted yet, OCR may still be processing.</span>
+                      <span className="text-slate-400 italic">No text extracted yet — OCR may still be processing.</span>
                     )}
                   </p>
                 </div>
@@ -285,7 +352,7 @@ export default function ScanScripts() {
               {scoreResult && (
                 <div className="border-t border-slate-100 p-5 space-y-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Suggested Scores (from Llama 3.3 via Groq, a lecturer must confirm these)
+                    Suggested Scores (from Llama 3.3 via Groq — a lecturer must confirm these)
                   </p>
                   {scoreResult.answers.map((ans) => {
                     const question = scoreResult.questions.find((q) => q.id === ans.questionId)
@@ -334,6 +401,7 @@ export default function ScanScripts() {
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }
