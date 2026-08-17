@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react'
-import { Sparkles, Plus, Trash2 } from 'lucide-react'
+import { Sparkles, Plus, Trash2, ArrowLeft } from 'lucide-react'
 import Topbar from '../components/Topbar.jsx'
 import { PrimaryButton, SecondaryButton } from '../components/ui.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
 
 // Converts an index to a letter label: 0->a, 1->b, ... 25->z, 26->aa, 27->ab, ...
-// This means a question can have as many sub-parts as needed, not just a–d.
 function letterLabel(index) {
   let n = index
   let label = ''
@@ -31,12 +30,51 @@ const blankGroup = (number) => ({
   parts: [blankPart()],
 })
 
+// Rebuilds the nested "groups" editor shape from the flat question list
+// the backend stores, so an existing guide can be reloaded for editing.
+function groupsFromQuestions(questions) {
+  const byNumber = {}
+  questions.forEach((q) => {
+    if (!byNumber[q.number]) byNumber[q.number] = []
+    byNumber[q.number].push(q)
+  })
+  const numbers = Object.keys(byNumber).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  return numbers.map((number) => ({
+    id: Date.now() + Math.random(),
+    number,
+    parts: byNumber[number]
+      .sort((a, b) => a.order - b.order)
+      .map((q) => ({
+        id: Date.now() + Math.random(),
+        text: q.text,
+        modelAnswer: q.modelAnswer,
+        keywords: q.keywords,
+        marks: q.maxMarks,
+      })),
+  }))
+}
+
 export default function MarkingGuides() {
   const { token } = useAuth()
+
+  // Stage: "choose" a session first, then "edit" the guide tied to it.
+  const [stage, setStage] = useState('choose')
+  const [sessions, setSessions] = useState([])
+  const [chosenSessionId, setChosenSessionId] = useState(localStorage.getItem('scriptmark_active_session') || '')
+  const [showNewSessionForm, setShowNewSessionForm] = useState(false)
+  const [newSessionTitle, setNewSessionTitle] = useState('')
+  const [newSessionDept, setNewSessionDept] = useState('')
+  const [newSessionFaculty, setNewSessionFaculty] = useState('')
+  const [currentSession, setCurrentSession] = useState(null)
+  const [loadingSession, setLoadingSession] = useState(false)
+
+  // Guide editor state
+  const [currentGuideId, setCurrentGuideId] = useState(null)
   const [title, setTitle] = useState('')
   const [groups, setGroups] = useState([blankGroup(1), blankGroup(2)])
   const [recentGuides, setRecentGuides] = useState([])
   const [loadingGuides, setLoadingGuides] = useState(true)
+  const [showAllGuides, setShowAllGuides] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
@@ -48,8 +86,18 @@ export default function MarkingGuides() {
   const totalQuestionCount = groups.reduce((sum, g) => sum + g.parts.length, 0)
 
   useEffect(() => {
+    loadSessions()
     loadGuides()
   }, [])
+
+  async function loadSessions() {
+    try {
+      const data = await api.getSessions(token)
+      setSessions(data)
+    } catch (err) {
+      console.error(err)
+    }
+  }
 
   async function loadGuides() {
     setLoadingGuides(true)
@@ -60,6 +108,73 @@ export default function MarkingGuides() {
       console.error(err)
     } finally {
       setLoadingGuides(false)
+    }
+  }
+
+  function resetGuideForm() {
+    setCurrentGuideId(null)
+    setTitle('')
+    setGroups([blankGroup(1), blankGroup(2)])
+  }
+
+  function loadGuideForEditing(guide) {
+    setCurrentGuideId(guide.id)
+    setTitle(guide.title)
+    setGroups(groupsFromQuestions(guide.questions))
+    setStage('edit')
+    setError('')
+    setSuccessMsg('')
+  }
+
+  async function enterSession(session) {
+    setLoadingSession(true)
+    setError('')
+    try {
+      const full = await api.getSession(session.id, token)
+      setCurrentSession(full)
+      localStorage.setItem('scriptmark_active_session', full.id)
+      localStorage.setItem('scriptmark_active_session_title', full.title)
+
+      if (full.guide) {
+        loadGuideForEditing(full.guide)
+      } else {
+        resetGuideForm()
+        setTitle(full.title) // sensible default, still editable
+        setStage('edit')
+      }
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoadingSession(false)
+    }
+  }
+
+  async function handleContinueSession() {
+    const session = sessions.find((s) => s.id === chosenSessionId)
+    if (!session) {
+      setError('Choose a session from the list first.')
+      return
+    }
+    enterSession(session)
+  }
+
+  async function handleStartNewSession() {
+    if (!newSessionTitle.trim()) {
+      setError('Give the new session a course/exam title.')
+      return
+    }
+    setLoadingSession(true)
+    setError('')
+    try {
+      const session = await api.createSession(
+        { title: newSessionTitle.trim(), department: newSessionDept.trim(), faculty: newSessionFaculty.trim() },
+        token
+      )
+      await loadSessions()
+      enterSession(session)
+    } catch (err) {
+      setError(err.message)
+      setLoadingSession(false)
     }
   }
 
@@ -76,9 +191,7 @@ export default function MarkingGuides() {
   }
 
   function addPart(groupId) {
-    setGroups((gs) =>
-      gs.map((g) => (g.id === groupId ? { ...g, parts: [...g.parts, blankPart()] } : g))
-    )
+    setGroups((gs) => gs.map((g) => (g.id === groupId ? { ...g, parts: [...g.parts, blankPart()] } : g)))
   }
 
   function removePart(groupId, partId) {
@@ -105,24 +218,20 @@ export default function MarkingGuides() {
       setError('Please give this marking guide a subject / exam title, even for a draft.')
       return
     }
-
     if (!isDraft) {
       if (groups.some((g) => !g.number.trim())) {
         setError('Every question needs a number (e.g. "1", "2").')
         return
       }
       if (groups.some((g) => g.parts.some((p) => !p.text.trim()))) {
-        setError('Every question (and sub-part) needs question text before publishing.')
+        setError('Every question (and subpart) needs question text before publishing.')
         return
       }
     }
 
-    // Flatten groups into the flat question list the backend expects.
-    // A group with only one part has no sub-label (plain "Question 1").
-    // A group with multiple parts gets subLabel a, b, c, ... automatically.
     const flatQuestions = groups.flatMap((g) =>
       g.parts
-        .filter((p) => isDraft || p.text.trim()) // drop fully-empty parts when publishing
+        .filter((p) => isDraft || p.text.trim())
         .map((p, i) => ({
           number: g.number,
           subLabel: g.parts.length > 1 ? letterLabel(i) : null,
@@ -135,10 +244,17 @@ export default function MarkingGuides() {
 
     setSaving(true)
     try {
-      await api.createGuide({ title, questions: flatQuestions, isDraft }, token)
+      let guide
+      if (currentGuideId) {
+        guide = await api.updateGuide(currentGuideId, { title, questions: flatQuestions, isDraft }, token)
+      } else {
+        guide = await api.createGuide({ title, questions: flatQuestions, isDraft }, token)
+        setCurrentGuideId(guide.id)
+        if (currentSession) {
+          await api.updateSession(currentSession.id, { guideId: guide.id }, token)
+        }
+      }
       setSuccessMsg(isDraft ? 'Saved as a draft — you can finish it later.' : 'Marking guide saved and published.')
-      setTitle('')
-      setGroups([blankGroup(1), blankGroup(2)])
       loadGuides()
     } catch (err) {
       setError(err.message)
@@ -147,6 +263,104 @@ export default function MarkingGuides() {
     }
   }
 
+  const visibleGuides = showAllGuides ? recentGuides : recentGuides.slice(0, 5)
+
+  // ---- Stage 1: choose a session ----
+  if (stage === 'choose') {
+    return (
+      <div className="flex h-full flex-col">
+        <Topbar title="Marking Guides" />
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6">
+            <p className="font-semibold text-slate-900 text-center">Which session is this guide for?</p>
+            <p className="text-sm text-slate-500 mt-1 text-center">
+              Marking guides are created within a course/exam session.
+            </p>
+
+            {error && (
+              <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">
+                {error}
+              </div>
+            )}
+
+            {!showNewSessionForm ? (
+              <>
+                <label className="block text-xs font-medium text-slate-500 mt-5">Continue with a session</label>
+                <select
+                  value={chosenSessionId}
+                  onChange={(e) => setChosenSessionId(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-400"
+                >
+                  <option value="">Select a session...</option>
+                  {sessions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.title}
+                    </option>
+                  ))}
+                </select>
+                <PrimaryButton
+                  onClick={handleContinueSession}
+                  disabled={loadingSession || !chosenSessionId}
+                  className="mt-3 w-full justify-center bg-sky-500 hover:bg-sky-400"
+                >
+                  {loadingSession ? 'Loading...' : 'Continue with Session'}
+                </PrimaryButton>
+
+                <div className="flex items-center gap-3 my-5">
+                  <div className="h-px flex-1 bg-slate-200" />
+                  <span className="text-xs text-slate-400">OR</span>
+                  <div className="h-px flex-1 bg-slate-200" />
+                </div>
+
+                <SecondaryButton onClick={() => setShowNewSessionForm(true)} className="w-full justify-center">
+                  <Plus size={16} /> Start New Session
+                </SecondaryButton>
+              </>
+            ) : (
+              <>
+                <label className="block text-xs font-medium text-slate-500 mt-5">Course / Exam Title</label>
+                <input
+                  value={newSessionTitle}
+                  onChange={(e) => setNewSessionTitle(e.target.value)}
+                  placeholder="CS101 Midterm"
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-400"
+                />
+                <label className="block text-xs font-medium text-slate-500 mt-3">Department</label>
+                <input
+                  value={newSessionDept}
+                  onChange={(e) => setNewSessionDept(e.target.value)}
+                  placeholder="Computer Science"
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-400"
+                />
+                <label className="block text-xs font-medium text-slate-500 mt-3">Faculty</label>
+                <input
+                  value={newSessionFaculty}
+                  onChange={(e) => setNewSessionFaculty(e.target.value)}
+                  placeholder="Physical Sciences"
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-400"
+                />
+                <PrimaryButton
+                  onClick={handleStartNewSession}
+                  disabled={loadingSession}
+                  className="mt-4 w-full justify-center bg-sky-500 hover:bg-sky-400"
+                >
+                  {loadingSession ? 'Creating...' : 'Create & Continue'}
+                </PrimaryButton>
+                <button
+                  onClick={() => setShowNewSessionForm(false)}
+                  className="mt-3 w-full text-center text-xs text-slate-400 hover:text-slate-600"
+                >
+                  Back to session list
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ---- Stage 2: edit the guide ----
   return (
     <div className="flex h-full flex-col">
       <Topbar
@@ -165,6 +379,13 @@ export default function MarkingGuides() {
 
       <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
         <div className="space-y-6">
+          <button
+            onClick={() => setStage('choose')}
+            className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700"
+          >
+            <ArrowLeft size={14} /> {currentSession ? `Session: ${currentSession.title}` : 'Change session'}
+          </button>
+
           {(error || successMsg) && (
             <div
               className={`rounded-lg border px-4 py-2.5 text-sm ${
@@ -181,7 +402,7 @@ export default function MarkingGuides() {
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Biology Midterm - Fall 2024"
+              placeholder="e.g., Biology Midterm, Fall 2024"
               className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-400"
             />
           </div>
@@ -219,20 +440,18 @@ export default function MarkingGuides() {
 
                 <div className="space-y-4">
                   {group.parts.map((part, i) => (
-                    <div
-                      key={part.id}
-                      className={hasSubParts ? 'rounded-lg border border-slate-100 bg-slate-50/50 p-4' : ''}
-                    >
+                    <div key={part.id} className={hasSubParts ? 'rounded-lg border border-slate-100 bg-slate-50/50 p-4' : ''}>
                       {hasSubParts && (
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-xs font-semibold text-sky-600">
-                            Part {group.number}{letterLabel(i)}
+                            Part {group.number}
+                            {letterLabel(i)}
                           </span>
                           {group.parts.length > 1 && (
                             <button
                               onClick={() => removePart(group.id, part.id)}
                               className="text-slate-400 hover:text-rose-500"
-                              title="Remove this sub-part"
+                              title="Remove this subpart"
                             >
                               <Trash2 size={14} />
                             </button>
@@ -253,7 +472,7 @@ export default function MarkingGuides() {
                         <label className="text-sm font-medium text-slate-700">Model Answer</label>
                         <button
                           type="button"
-                          onClick={() => setError('AI-assisted generation is coming in a later phase (LLM integration).')}
+                          onClick={() => setError('Automatic generation is coming in a later phase (LLM integration).')}
                           className="flex items-center gap-1 text-xs font-medium text-sky-600 hover:text-sky-700"
                         >
                           <Sparkles size={12} /> Generate with AI
@@ -295,7 +514,7 @@ export default function MarkingGuides() {
                   onClick={() => addPart(group.id)}
                   className="mt-4 flex items-center gap-1.5 text-sm font-medium text-sky-600 hover:text-sky-700"
                 >
-                  <Plus size={14} /> Add sub-part (e.g. {letterLabel(group.parts.length)})
+                  <Plus size={14} /> Add subpart (e.g. {letterLabel(group.parts.length)})
                 </button>
               </div>
             )
@@ -307,7 +526,7 @@ export default function MarkingGuides() {
           >
             <Plus size={20} />
             <span className="font-medium">Add Another Question</span>
-            <span className="text-xs text-slate-400">Each question can optionally be split into as many sub-parts as needed</span>
+            <span className="text-xs text-slate-400">Each question can optionally be split into as many subparts as needed</span>
           </button>
         </div>
 
@@ -316,7 +535,7 @@ export default function MarkingGuides() {
           <div className="rounded-xl bg-ink-950 text-white p-5">
             <p className="font-semibold mb-4">Guide Summary</p>
             <div className="flex items-center justify-between text-sm py-2 border-b border-white/10">
-              <span className="text-slate-300">Questions (incl. sub-parts)</span>
+              <span className="text-slate-300">Questions (incl. subparts)</span>
               <span className="font-semibold">{totalQuestionCount}</span>
             </div>
             <div className="flex items-center justify-between text-sm py-2 border-b border-white/10">
@@ -332,41 +551,53 @@ export default function MarkingGuides() {
             <p className="mt-3 flex items-start gap-2 rounded-lg bg-white/5 p-3 text-xs text-slate-300">
               <Sparkles size={14} className="shrink-0 mt-0.5" />
               Formulas can be typed as plain text (e.g. "v = u + at"). Handwritten formulas in scanned scripts may not
-              OCR perfectly — this is a known limitation of general-purpose OCR.
+              OCR perfectly — this is a known limitation of standard OCR tools.
             </p>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white p-5">
             <div className="flex items-center justify-between mb-3">
               <p className="font-semibold text-sm text-slate-900">Recent Guides</p>
-              <button className="text-xs font-medium text-sky-600">View All</button>
+              {recentGuides.length > 5 && (
+                <button
+                  onClick={() => setShowAllGuides((v) => !v)}
+                  className="text-xs font-medium text-sky-600 hover:text-sky-700"
+                >
+                  {showAllGuides ? 'Show Less' : 'View All'}
+                </button>
+              )}
             </div>
             {loadingGuides ? (
               <p className="text-sm text-slate-400">Loading guides...</p>
             ) : recentGuides.length === 0 ? (
               <p className="text-sm text-slate-400">No marking guides yet — create your first one on the left.</p>
             ) : (
-              <ul className="space-y-3">
-                {recentGuides.slice(0, 5).map((g) => {
+              <ul className="space-y-1 max-h-96 overflow-y-auto">
+                {visibleGuides.map((g) => {
                   const totalGuideMarks = g.questions.reduce((sum, q) => sum + q.maxMarks, 0)
                   return (
-                    <li key={g.id} className="pb-3 border-b border-slate-100 last:border-0 last:pb-0">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-slate-800">{g.title}</p>
-                        <span
-                          className={`text-xs font-medium rounded-full px-2 py-0.5 ${
-                            g.isDraft ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'
-                          }`}
-                        >
-                          {g.isDraft ? 'Draft' : 'Active'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        {g.questions.length} Questions &bull; {totalGuideMarks} Marks
-                      </p>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        Updated {new Date(g.updatedAt).toLocaleDateString()}
-                      </p>
+                    <li key={g.id}>
+                      <button
+                        onClick={() => loadGuideForEditing(g)}
+                        className={`w-full text-left rounded-lg px-2 py-2 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors ${
+                          currentGuideId === g.id ? 'bg-sky-50' : ''
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium text-slate-800">{g.title}</p>
+                          <span
+                            className={`text-xs font-medium rounded-full px-2 py-0.5 ${
+                              g.isDraft ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'
+                            }`}
+                          >
+                            {g.isDraft ? 'Draft' : 'Active'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {g.questions.length} Questions &bull; {totalGuideMarks} Marks
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5">Updated {new Date(g.updatedAt).toLocaleDateString()}</p>
+                      </button>
                     </li>
                   )
                 })}

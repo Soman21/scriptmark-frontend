@@ -29,9 +29,12 @@ export default function Results() {
     }
     try {
       const data = await api.getSessionScripts(sessionId, token)
+      // Only scripts that have been scored are worth reviewing here.
       const scored = data.filter((s) => s.answers && s.answers.length > 0)
       setScripts(scored)
 
+      // Populate draft scores with the LLM's suggestions, so the lecturer
+      // is editing/confirming rather than typing from scratch.
       const drafts = {}
       scored.forEach((s) => {
         s.answers.forEach((a) => {

@@ -1,120 +1,170 @@
-import { useState } from 'react'
-import { Sparkles, CheckCircle2, ChevronRight, Send, Plus, Mic, FileText } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import {
+  ScanLine,
+  BookOpen,
+  CheckSquare,
+  Download,
+  Users,
+  CheckCircle2,
+  Clock,
+  Flag,
+  ArrowRight,
+} from 'lucide-react'
 import Topbar from '../components/Topbar.jsx'
-import { PrimaryButton } from '../components/ui.jsx'
-
-const messages = [
-  {
-    role: 'user',
-    text: "I've just uploaded the new marking guide for the Digital Electronics (ECE 831). Can you verify the grading criteria for Question 4 - Computer Architecture?",
-    file: 'digital_electronics_v2.pdf',
-  },
-  {
-    role: 'assistant',
-    intro: 'Got it. I\u2019ve processed the Digital Electronics guide. Ready to scan scripts.',
-    body: 'For Question 4, I\u2019ve identified four key marking points:',
-    points: [
-      '2 points for the correct Schr\u00f6dinger equation derivation.',
-      '1 point for identifying the boundary conditions.',
-    ],
-  },
-]
+import { PrimaryButton, SecondaryButton, StatCard } from '../components/ui.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
+import { api } from '../lib/api.js'
 
 export default function Dashboard() {
-  const [draft, setDraft] = useState('')
+  const { user, token } = useAuth()
+  const navigate = useNavigate()
+
+  const [sessions, setSessions] = useState([])
+  const [activeSessionId, setActiveSessionId] = useState(localStorage.getItem('scriptmark_active_session') || '')
+  const [activeSessionTitle, setActiveSessionTitle] = useState(
+    localStorage.getItem('scriptmark_active_session_title') || ''
+  )
+  const [stats, setStats] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    loadEverything()
+  }, [])
+
+  async function loadEverything() {
+    setLoading(true)
+    try {
+      const sessionList = await api.getSessions(token)
+      setSessions(sessionList)
+
+      if (activeSessionId) {
+        const scripts = await api.getSessionScripts(activeSessionId, token)
+        setStats({
+          total: scripts.length,
+          reviewed: scripts.filter((s) => s.status === 'REVIEWED').length,
+          pending: scripts.filter((s) => s.status === 'DIGITIZED' || s.status === 'PENDING').length,
+          flagged: scripts.filter((s) => s.status === 'FLAGGED').length,
+        })
+      }
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function switchSession(session) {
+    localStorage.setItem('scriptmark_active_session', session.id)
+    localStorage.setItem('scriptmark_active_session_title', session.title)
+    localStorage.removeItem('scriptmark_active_script') // don't carry over another session's script in progress
+    setActiveSessionId(session.id)
+    setActiveSessionTitle(session.title)
+    loadEverything()
+  }
+
+  const quickActions = [
+    { label: 'Scan Scripts', icon: ScanLine, to: '/scan', color: 'bg-sky-500 hover:bg-sky-400' },
+    { label: 'Marking Guides', icon: BookOpen, to: '/guides', color: 'bg-slate-700 hover:bg-slate-600' },
+    { label: 'Review Scores', icon: CheckSquare, to: '/results', color: 'bg-slate-700 hover:bg-slate-600' },
+    { label: 'Export Results', icon: Download, to: '/archive', color: 'bg-slate-700 hover:bg-slate-600' },
+  ]
 
   return (
     <div className="flex h-full flex-col">
-      <Topbar
-        title="Active Marking: Physics Mid-term"
-        tabs={['Sessions', 'Guides', 'Archive']}
-        activeTab="Sessions"
-        right={<PrimaryButton className="bg-ink-950">Upgrade</PrimaryButton>}
-      />
+      <Topbar title={`Welcome${user ? `, ${user.name.split(' ')[0]}` : ''}`} />
 
-      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
-        {messages.map((m, i) =>
-          m.role === 'user' ? (
-            <div key={i} className="flex justify-end">
-              <div className="max-w-xl rounded-2xl bg-slate-100 px-5 py-4">
-                <p className="text-sm text-slate-800">{m.text}</p>
-                {m.file && (
-                  <div className="mt-3 flex items-center gap-2 rounded-lg bg-white border border-slate-200 px-3 py-2 text-sm text-slate-600">
-                    <FileText size={16} />
-                    {m.file}
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {/* Active session overview */}
+        <div className="rounded-xl border border-slate-200 bg-white p-5">
+          {activeSessionId ? (
+            <>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Active Session</p>
+                  <p className="text-xl font-bold text-slate-900 mt-1">{activeSessionTitle}</p>
+                </div>
+                <SecondaryButton onClick={() => navigate('/scan')}>
+                  Continue Scanning <ArrowRight size={14} />
+                </SecondaryButton>
+              </div>
+
+              {loading ? (
+                <p className="text-sm text-slate-400 mt-4">Loading stats...</p>
+              ) : (
+                stats && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5">
+                    <StatCard icon={<Users size={16} className="text-sky-500" />} label="Total Scripts" value={stats.total} />
+                    <StatCard
+                      icon={<CheckCircle2 size={16} className="text-emerald-500" />}
+                      label="Reviewed"
+                      value={stats.reviewed}
+                    />
+                    <StatCard icon={<Clock size={16} className="text-amber-500" />} label="Pending" value={stats.pending} />
+                    <StatCard icon={<Flag size={16} className="text-rose-500" />} label="Flagged" value={stats.flagged} />
                   </div>
-                )}
-              </div>
-            </div>
+                )
+              )}
+            </>
           ) : (
-            <div key={i} className="flex items-start gap-3">
-              <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink-950 text-white">
-                <Sparkles size={16} />
-              </div>
-              <div className="max-w-xl rounded-2xl border border-sky-100 bg-sky-50 px-5 py-4">
-                <p className="text-sm text-slate-800">
-                  {m.intro.split('Digital Electronics').map((chunk, idx) =>
-                    idx === 0 ? (
-                      <span key={idx}>{chunk}</span>
-                    ) : (
-                      <span key={idx}>
-                        <span className="font-semibold text-sky-700">Digital Electronics</span>
-                        {chunk}
-                      </span>
-                    )
+            <div className="text-center py-6">
+              <p className="text-slate-500">No active session yet.</p>
+              <PrimaryButton onClick={() => navigate('/scan')} className="mt-3 mx-auto bg-sky-500 hover:bg-sky-400">
+                Start a Session <ArrowRight size={14} />
+              </PrimaryButton>
+            </div>
+          )}
+        </div>
+
+        {/* Quick actions */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {quickActions.map(({ label, icon: Icon, to, color }) => (
+            <button
+              key={to}
+              onClick={() => navigate(to)}
+              className={`rounded-xl ${color} text-white p-4 flex flex-col items-center gap-2 transition-colors`}
+            >
+              <Icon size={20} />
+              <span className="text-sm font-medium">{label}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* All sessions */}
+        <div className="rounded-xl border border-slate-200 bg-white">
+          <div className="px-5 py-3 border-b border-slate-100">
+            <p className="font-semibold text-sm text-slate-900">Your Sessions</p>
+          </div>
+          {sessions.length === 0 ? (
+            <p className="px-5 py-6 text-sm text-slate-400 text-center">
+              No sessions yet — start one from Scan Scripts or Marking Guides.
+            </p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {sessions.map((s) => (
+                <li key={s.id} className="flex items-center justify-between px-5 py-3">
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">{s.title}</p>
+                    <p className="text-xs text-slate-400">
+                      {s.guide?.title ? `Guide: ${s.guide.title}` : 'No guide linked yet'} &bull; {s._count?.scripts ?? 0}{' '}
+                      scripts
+                    </p>
+                  </div>
+                  {s.id === activeSessionId ? (
+                    <span className="text-xs font-medium text-sky-600">Active</span>
+                  ) : (
+                    <button
+                      onClick={() => switchSession(s)}
+                      className="text-xs font-medium text-slate-500 hover:text-sky-600"
+                    >
+                      Switch to this
+                    </button>
                   )}
-                </p>
-                <p className="text-sm text-slate-800 mt-3">{m.body}</p>
-                <ul className="mt-2 space-y-1.5">
-                  {m.points.map((p, idx) => (
-                    <li key={idx} className="flex items-start gap-2 text-sm text-slate-700">
-                      <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-sky-500" />
-                      {p}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          )
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-          <div className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-4">
-            <div className="h-16 w-16 shrink-0 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center text-slate-400 text-xs">
-              script
-            </div>
-            <div className="flex-1">
-              <p className="font-semibold text-slate-900">Queue Status</p>
-              <p className="text-sm text-slate-500">32 scripts pending for ECE 831. Estimated grading time: 4 minutes.</p>
-            </div>
-            <ChevronRight className="text-slate-400" size={18} />
-          </div>
-          <div className="rounded-xl bg-sky-50 p-4 flex flex-col items-center justify-center text-center">
-            <p className="text-3xl font-bold text-sky-600">98%</p>
-            <p className="text-xs font-medium text-sky-700 tracking-wide mt-1">ACCURACY RATING</p>
-          </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-      </div>
-
-      <div className="border-t border-slate-200 px-6 py-4">
-        <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5">
-          <button className="text-slate-400 hover:text-slate-600">
-            <Plus size={18} />
-          </button>
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="Message ScriptMark..."
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
-          />
-          <button className="text-slate-400 hover:text-slate-600">
-            <Mic size={18} />
-          </button>
-          <button className="rounded-full bg-ink-950 p-2 text-white hover:bg-ink-900">
-            <Send size={16} />
-          </button>
-        </div>
-        <p className="mt-2 text-center text-xs text-slate-400">AI can make mistakes. Check important info.</p>
       </div>
     </div>
   )

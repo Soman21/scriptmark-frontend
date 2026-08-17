@@ -25,7 +25,7 @@ export default function Archive() {
   const [scripts, setScripts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [exporting, setExporting] = useState(false)
+  const [exporting, setExporting] = useState(false) // false | 'xlsx' | 'pdf'
   const [caScores, setCaScores] = useState({}) // { scriptId: value }
 
   useEffect(() => {
@@ -73,12 +73,12 @@ export default function Archive() {
     }
   }
 
-  async function handleExport() {
+  async function handleExport(format) {
     const sessionId = localStorage.getItem('scriptmark_active_session')
-    setExporting(true)
+    setExporting(format)
     setError('')
     try {
-      const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/export`, {
+      const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/export?format=${format}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) throw new Error('Could not generate the export.')
@@ -87,7 +87,8 @@ export default function Archive() {
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${(session?.title || 'results').replace(/[^a-z0-9]/gi, '_')}_results.xlsx`
+      const ext = format === 'pdf' ? 'pdf' : 'xlsx'
+      a.download = `${(session?.title || 'results').replace(/[^a-z0-9]/gi, '_')}_results.${ext}`
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -138,9 +139,12 @@ export default function Archive() {
               <StatCard icon={<Clock size={16} className="text-amber-500" />} label="Pending Review" value={pending} />
             </div>
 
-            <div className="flex justify-end">
-              <PrimaryButton onClick={handleExport} disabled={exporting}>
-                <Download size={16} /> {exporting ? 'Generating...' : 'Export to Excel'}
+            <div className="flex justify-end gap-2">
+              <PrimaryButton onClick={() => handleExport('xlsx')} disabled={!!exporting}>
+                <Download size={16} /> {exporting === 'xlsx' ? 'Generating...' : 'Export to Excel'}
+              </PrimaryButton>
+              <PrimaryButton onClick={() => handleExport('pdf')} disabled={!!exporting} className="bg-slate-700 hover:bg-slate-600">
+                <Download size={16} /> {exporting === 'pdf' ? 'Generating...' : 'Export to PDF'}
               </PrimaryButton>
             </div>
 

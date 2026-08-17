@@ -35,7 +35,7 @@ export default function Sidebar({ user, onSignOut }) {
     try {
       await api.createSession({ title: `Marking Session — ${new Date().toLocaleDateString()}` }, token)
     } catch (err) {
-      // Non-fatal: still let the lecturer proceed to the scan screen
+      // Not fatal: still let the lecturer proceed to the scan screen
       console.error(err)
     } finally {
       setCreating(false)

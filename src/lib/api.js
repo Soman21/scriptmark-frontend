@@ -26,13 +26,18 @@ export const api = {
   login: (payload) => request('/api/auth/login', { method: 'POST', body: payload }),
 
   getGuides: (token) => request('/api/guides', { token }),
+  getGuide: (id, token) => request(`/api/guides/${id}`, { token }),
   createGuide: (payload, token) => request('/api/guides', { method: 'POST', body: payload, token }),
+  updateGuide: (id, payload, token) => request(`/api/guides/${id}`, { method: 'PUT', body: payload, token }),
 
   getSessions: (token) => request('/api/sessions', { token }),
+  getSession: (id, token) => request(`/api/sessions/${id}`, { token }),
   createSession: (payload, token) => request('/api/sessions', { method: 'POST', body: payload, token }),
+  updateSession: (id, payload, token) => request(`/api/sessions/${id}`, { method: 'PUT', body: payload, token }),
   getSessionScripts: (sessionId, token) => request(`/api/sessions/${sessionId}/scripts`, { token }),
+  getScript: (scriptId, token) => request(`/api/sessions/scripts/${scriptId}`, { token }),
   updateCaScore: (scriptId, caScore, token) =>
-    request(`/api/sessions/scripts/${scriptId}/ca-score`, { method: 'PUT', body: { caScore }, token }),
+    request(`/api/sessions/scripts/${scriptId}/caScore`, { method: 'PUT', body: { caScore }, token }),
 
   confirmScore: (answerId, payload, token) =>
     request(`/api/results/${answerId}/confirm`, { method: 'PUT', body: payload, token }),

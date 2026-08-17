@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Search, UploadCloud, Camera, CheckCircle2, RotateCw, Loader2, AlertCircle, FilePlus2, UserPlus } from 'lucide-react'
+import { Search, UploadCloud, Camera, CheckCircle2, RotateCw, Loader2, AlertCircle, FilePlus2, UserPlus, X } from 'lucide-react'
 import Topbar from '../components/Topbar.jsx'
 import { PrimaryButton, SecondaryButton, Badge } from '../components/ui.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -10,6 +10,12 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000'
 export default function ScanScripts() {
   const { token } = useAuth()
   const fileInputRef = useRef(null)
+  const videoRef = useRef(null)
+  const canvasRef = useRef(null)
+  const streamRef = useRef(null)
+
+  const [cameraOpen, setCameraOpen] = useState(false)
+  const [cameraError, setCameraError] = useState('')
 
   // Session (course/exam) state
   const [sessionId, setSessionId] = useState(null)
@@ -19,7 +25,7 @@ export default function ScanScripts() {
   const [facultyInput, setFacultyInput] = useState('')
   const [startingSession, setStartingSession] = useState(false)
 
-  // Current student / in-progress multi-page script
+  // Current student / script in progress across multiple pages
   const [studentNameInput, setStudentNameInput] = useState('')
   const [regNumberInput, setRegNumberInput] = useState('')
   const [activeScript, setActiveScript] = useState(null) // the script currently receiving pages
@@ -35,12 +41,39 @@ export default function ScanScripts() {
   useEffect(() => {
     const id = localStorage.getItem('scriptmark_active_session')
     const title = localStorage.getItem('scriptmark_active_session_title')
+    const savedGuideId = localStorage.getItem('scriptmark_selected_guide')
+    if (savedGuideId) setSelectedGuideId(savedGuideId)
+
     if (id && title) {
       setSessionId(id)
       setSessionTitle(title)
+      restoreProgress(id)
     }
     loadGuides()
   }, [])
+
+  // Reload the session's scripts (so you see what you already uploaded before
+  // leaving the page) and resume whichever script was in progress, if any.
+  async function restoreProgress(activeSessionId) {
+    try {
+      const scriptData = await api.getSessionScripts(activeSessionId, token)
+      setScripts(scriptData)
+
+      const inProgressId = localStorage.getItem('scriptmark_active_script')
+      if (inProgressId) {
+        const found = scriptData.find((s) => s.id === inProgressId)
+        if (found) {
+          setActiveScript(found)
+          setStudentNameInput(found.studentName || '')
+          setRegNumberInput(found.regNumber || '')
+        } else {
+          localStorage.removeItem('scriptmark_active_script')
+        }
+      }
+    } catch (err) {
+      console.error(err)
+    }
+  }
 
   async function loadGuides() {
     try {
@@ -50,6 +83,22 @@ export default function ScanScripts() {
       console.error(err)
     }
   }
+
+  // Keep localStorage in sync so navigating away and back (or a refresh) resumes
+  // exactly where you left off, instead of losing progress.
+  useEffect(() => {
+    if (activeScript) {
+      localStorage.setItem('scriptmark_active_script', activeScript.id)
+    } else {
+      localStorage.removeItem('scriptmark_active_script')
+    }
+  }, [activeScript])
+
+  useEffect(() => {
+    if (selectedGuideId) {
+      localStorage.setItem('scriptmark_selected_guide', selectedGuideId)
+    }
+  }, [selectedGuideId])
 
   async function handleStartSession() {
     if (!sessionNameInput.trim()) {
@@ -77,22 +126,23 @@ export default function ScanScripts() {
   function handleEndSession() {
     localStorage.removeItem('scriptmark_active_session')
     localStorage.removeItem('scriptmark_active_session_title')
+    localStorage.removeItem('scriptmark_active_script')
+    localStorage.removeItem('scriptmark_selected_guide')
     setSessionId(null)
     setSessionTitle('')
     setScripts([])
     setScoreResult(null)
     setActiveScript(null)
+    setSelectedGuideId('')
   }
 
-  // Uploads a page. If activeScript is set, it's appended as the NEXT page of that
-  // student's script. Otherwise it starts a brand new script for a new student.
-  async function handleFileChange(e) {
-    const file = e.target.files?.[0]
-    if (!file || !sessionId) return
+  // Uploads a page (given as a File or Blob). If activeScript is set, it's appended
+  // as the NEXT page of that student's script. Otherwise it starts a brand new script.
+  async function uploadPage(fileOrBlob, filename) {
+    if (!fileOrBlob || !sessionId) return
 
     if (!activeScript && !studentNameInput.trim() && !regNumberInput.trim()) {
       setError('Enter a student name or reg number before uploading the first page.')
-      if (fileInputRef.current) fileInputRef.current.value = ''
       return
     }
 
@@ -100,7 +150,7 @@ export default function ScanScripts() {
     setError('')
     try {
       const formData = new FormData()
-      formData.append('image', file)
+      formData.append('image', fileOrBlob, filename || 'page.jpg')
       if (activeScript) {
         formData.append('scriptId', activeScript.id)
       } else {
@@ -128,9 +178,72 @@ export default function ScanScripts() {
       setError(err.message)
     } finally {
       setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
+
+  function handleFileChange(e) {
+    const file = e.target.files?.[0]
+    uploadPage(file, file?.name)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // Live camera capture: works on a phone's or laptop's own camera, via the browser
+  async function openCamera() {
+    setCameraError('')
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('This browser does not support camera capture. Use "Select File" instead.')
+      return
+    }
+    try {
+      // Prefer the rear facing camera on phones, since that's what you would point at a page.
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      streamRef.current = stream
+      setCameraOpen(true)
+      // The <video> element only exists once cameraOpen is true, so attach the stream
+      // on the next tick after render.
+      setTimeout(() => {
+        if (videoRef.current) videoRef.current.srcObject = stream
+      }, 0)
+    } catch (err) {
+      setCameraError('Could not access the camera. Check your browser permission for this site.')
+    }
+  }
+
+  function closeCamera() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+    }
+    setCameraOpen(false)
+  }
+
+  async function capturePhoto() {
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    if (!video || !canvas) return
+
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+
+    canvas.toBlob(
+      (blob) => {
+        if (blob) uploadPage(blob, `capture_${Date.now()}.jpg`)
+      },
+      'image/jpeg',
+      0.92
+    )
+  }
+
+  // Release the camera if the lecturer navigates away without explicitly closing it.
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop())
+      }
+    }
+  }, [])
 
   function handleNewStudent() {
     setActiveScript(null)
@@ -320,7 +433,7 @@ export default function ScanScripts() {
                 accept="image/*"
                 onChange={handleFileChange}
                 className="hidden"
-                id="script-upload-input"
+                id="scriptUploadInput"
               />
               <PrimaryButton
                 onClick={() => fileInputRef.current?.click()}
@@ -339,17 +452,47 @@ export default function ScanScripts() {
               </PrimaryButton>
             </div>
 
-            <div className="relative rounded-xl bg-ink-950 overflow-hidden aspect-video flex items-center justify-center">
-              <span className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-rose-500 px-2.5 py-1 text-xs font-medium text-white">
-                <span className="h-1.5 w-1.5 rounded-full bg-white" /> LIVE SCAN
-              </span>
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-white">
-                <Camera size={22} />
+            {cameraError && (
+              <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">
+                <AlertCircle size={14} /> {cameraError}
               </div>
-              <p className="absolute bottom-3 left-0 right-0 text-center text-xs text-slate-300">
-                Live camera capture isn&apos;t wired up yet — use the button above for now
-              </p>
-            </div>
+            )}
+
+            {!cameraOpen ? (
+              <button
+                onClick={openCamera}
+                disabled={!sessionId}
+                className="relative rounded-xl bg-ink-950 overflow-hidden aspect-video flex items-center justify-center w-full hover:opacity-90 transition-opacity"
+              >
+                <div className="flex flex-col items-center gap-2 text-white">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10">
+                    <Camera size={22} />
+                  </div>
+                  <p className="text-xs text-slate-300">Tap to use your camera (phone or webcam)</p>
+                </div>
+              </button>
+            ) : (
+              <div className="relative rounded-xl bg-ink-950 overflow-hidden aspect-video">
+                <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
+                <canvas ref={canvasRef} className="hidden" />
+                <span className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-rose-500 px-2.5 py-1 text-xs font-medium text-white">
+                  <span className="h-1.5 w-1.5 rounded-full bg-white" /> LIVE
+                </span>
+                <button
+                  onClick={closeCamera}
+                  className="absolute top-3 right-3 rounded-full bg-black/50 p-1.5 text-white hover:bg-black/70"
+                >
+                  <X size={16} />
+                </button>
+                <button
+                  onClick={capturePhoto}
+                  disabled={uploading}
+                  className="absolute bottom-4 left-1/2 -translate-x-1/2 flex h-14 w-14 items-center justify-center rounded-full bg-white text-ink-950 shadow-lg disabled:opacity-60"
+                >
+                  {uploading ? <Loader2 size={22} className="animate-spin" /> : <Camera size={22} />}
+                </button>
+              </div>
+            )}
 
             <div className="rounded-xl border border-slate-200 bg-white">
               <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
